@@ -482,7 +482,7 @@
       <div class="field"><label>পাসওয়ার্ড</label><input type="password" id="pw-input" placeholder="পাসওয়ার্ড" /></div>
       <button class="btn btn-primary" style="width:100%" onclick="doLogin()">লগইন</button>
       <p id="login-err" class="err-msg" style="margin-top:10px;"></p>
-      <p style="color:var(--muted);font-size:0.85rem;margin-top:14px;">ডিফল্ট পাসওয়ার্ড: <strong>admin123</strong></p>
+
     </div>
 
     <!-- ADMIN PANEL -->
@@ -940,7 +940,7 @@ window.doLogin = async function() {
     document.getElementById('pw-input').value = '';
     showAdminPanel();
   } else {
-    document.getElementById('login-err').textContent = 'ভুল পাসওয়ার্ড। ডিফল্ট: admin123';
+    document.getElementById('login-err').textContent = 'ভুল পাসওয়ার্ড!';
   }
 }
 window.doLogout = function() {
