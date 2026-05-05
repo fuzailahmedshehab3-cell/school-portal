@@ -660,12 +660,30 @@
   </div>
 </div>
 
-<script>
+<script type="module">
+// ============ FIREBASE SETUP ============
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD0Y28Qwj6zlKRXnCXx2ahl8-I5v8koAGg",
+  authDomain: "school-portal-ac13e.firebaseapp.com",
+  projectId: "school-portal-ac13e",
+  storageBucket: "school-portal-ac13e.firebasestorage.app",
+  messagingSenderId: "227333148358",
+  appId: "1:227333148358:web:50db8afc938019c2f191c7",
+  measurementId: "G-MSXZZZFTFR"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const DOC_REF = doc(db, 'portal', 'data');
+const PW_REF = doc(db, 'portal', 'settings');
+
 // ============ DATA STORE ============
 const STORAGE_KEY = 'school_portal_data';
 const PW_KEY = 'school_portal_pw';
 const SESSION_KEY = 'school_portal_session';
-
 const DEFAULT_PW = 'admin123';
 
 const defaultData = {
@@ -680,12 +698,55 @@ const defaultData = {
   notices: [], exams: [], results: [], resources: [], classes: [], routine: []
 };
 
-function getData() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultData; } catch { return defaultData; }
+// Local cache
+let localData = defaultData;
+let localPw = DEFAULT_PW;
+
+function getData() { return localData; }
+
+async function saveData(d) {
+  localData = d;
+  try {
+    await setDoc(DOC_REF, d);
+  } catch(e) {
+    console.error('Firebase save error:', e);
+    // fallback to localStorage
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+  }
 }
-function saveData(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
-function getPw() { return localStorage.getItem(PW_KEY) || DEFAULT_PW; }
+
+async function getPw() {
+  try {
+    const snap = await getDoc(PW_REF);
+    if (snap.exists() && snap.data().pw) return snap.data().pw;
+  } catch(e) {}
+  return localStorage.getItem(PW_KEY) || DEFAULT_PW;
+}
+
+async function savePw(pw) {
+  try {
+    await setDoc(PW_REF, { pw });
+  } catch(e) {}
+  localStorage.setItem(PW_KEY, pw);
+}
+
 function isLoggedIn() { return sessionStorage.getItem(SESSION_KEY) === '1'; }
+
+// ============ REALTIME LISTENER ============
+// Listen for changes from Firestore → auto-update all devices
+onSnapshot(DOC_REF, (snap) => {
+  if (snap.exists()) {
+    localData = snap.data();
+  } else {
+    localData = defaultData;
+  }
+  renderAll();
+}, (err) => {
+  console.error('Firestore listen error:', err);
+  // fallback
+  try { localData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultData; } catch { localData = defaultData; }
+  renderAll();
+});
 
 // ============ VIEW ============
 const dayOrder = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
@@ -695,7 +756,7 @@ let selGrade = '', selDay = '';
 
 function todayKey() { return dayOrder[new Date().getDay()]; }
 
-function showView(v) {
+window.showView = function(v) {
   activeView = v;
   document.querySelectorAll('[data-view]').forEach(s => s.classList.toggle('active', s.id === 'view-' + v));
   document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
@@ -710,7 +771,6 @@ function renderAll() {
   const d = getData();
   const s = d.settings || defaultData.settings;
 
-  // Nav & hero
   document.getElementById('nav-name').textContent = s.name || '-';
   document.getElementById('hero-name').textContent = s.name || '-';
   document.getElementById('hero-desc').textContent = s.desc || '-';
@@ -724,38 +784,31 @@ function renderAll() {
   document.getElementById('c-email').textContent = s.email || '-';
   document.getElementById('c-hours').textContent = s.hours || '-';
 
-  // Home notices (top 3)
   const hn = (d.notices||[]).slice(0,3);
   document.getElementById('home-notice').innerHTML = hn.length
     ? hn.map(n => `<li><div class="notice-date">${esc(n.date)}</div><div><strong>${esc(n.title)}</strong><span>${esc(n.description)}</span></div></li>`).join('')
     : '<li><div><strong>কোনো নোটিশ নেই</strong><span>অ্যাডমিন প্যানেল থেকে নোটিশ যোগ করুন।</span></div></li>';
 
-  // Notice list
   document.getElementById('notice-list').innerHTML = (d.notices||[]).length
     ? (d.notices||[]).map(n => `<li><div class="notice-date">${esc(n.date)}</div><div><strong>${esc(n.title)}</strong><span>${esc(n.description)}</span></div></li>`).join('')
     : '<li><div><strong>কোনো নোটিশ নেই</strong></div></li>';
 
-  // Exams
   document.getElementById('exam-list').innerHTML = (d.exams||[]).length
     ? (d.exams||[]).map(e => `<li><strong>${esc(e.grade)} - ${esc(e.subject)}</strong><span>${esc(e.date)} | ${esc(e.time)} | ${esc(e.room||'রুম নির্ধারিত নয়')}</span><span>${esc(e.instructions||'')}</span></li>`).join('')
     : '<li><strong>পরীক্ষার আপডেট নেই</strong><span>অ্যাডমিন প্যানেল থেকে পরীক্ষার সময়সূচি যোগ করুন।</span></li>';
 
-  // Results
   document.getElementById('result-list').innerHTML = (d.results||[]).length
     ? (d.results||[]).map(r => `<li><strong>${esc(r.grade)} - ${esc(r.title)}</strong><span>${esc(r.date)} | ${esc(r.desc||'')}</span>${r.pdf ? `<a class="pdf-link" href="${esc(r.pdf)}" target="_blank">PDF রেজাল্ট দেখুন ↗</a>` : ''}</li>`).join('')
     : '<li><strong>রেজাল্ট প্রকাশ হয়নি</strong><span>অ্যাডমিন প্যানেল থেকে PDF লিংক যোগ করুন।</span></li>';
 
-  // Resources
   document.getElementById('resource-grid').innerHTML = (d.resources||[]).length
     ? (d.resources||[]).map((r,i) => `<div class="res-card"><div class="res-icon">${esc(r.grade ? r.grade.charAt(0) : (i+1)+'')}</div><h3>${esc(r.grade||'')} ${esc(r.title)}</h3><p>${esc(r.description)}</p><a href="${esc(r.link||'#')}" target="_blank">সিলেবাস দেখুন ↗</a></div>`).join('')
     : '<div class="res-card"><h3>সিলেবাস নেই</h3><p>অ্যাডমিন প্যানেল থেকে সিলেবাস যোগ করুন।</p></div>';
 
-  // Classes
   document.getElementById('class-grid').innerHTML = (d.classes||[]).length
     ? (d.classes||[]).map(c => `<div class="class-card" onclick="showView('routine')"><span class="class-badge">${esc(c.grade)}</span><h3>${esc(c.grade)}</h3><p><strong>শ্রেণি শিক্ষক:</strong> ${esc(c.teacher)}</p><p><strong>রুম:</strong> ${esc(c.room)}</p><p><strong>বিষয়:</strong> ${esc(c.subjects)}</p><p><strong>কার্যক্রম:</strong> ${esc(c.activities)}</p></div>`).join('')
     : '<div class="class-card"><h3>শ্রেণির তথ্য নেই</h3><p>অ্যাডমিন প্যানেল থেকে শ্রেণি যোগ করুন।</p></div>';
 
-  // Routine grade filter
   const grades = [...new Set((d.classes||[]).map(c => c.grade).filter(Boolean))];
   const defaultGrades = ['৬ষ্ঠ শ্রেণি','৭ম শ্রেণি','অষ্টম শ্রেণি','নবম শ্রেণি','দশম শ্রেণি','একাদশ শ্রেণি','দ্বাদশ শ্রেণি'];
   const allGrades = [...new Set([...defaultGrades, ...grades])];
@@ -793,38 +846,22 @@ function renderRoutine(d) {
 
 function renderTodaySchedule(d) {
   const todayKey2 = todayKey();
-  const todayLabel = dayLabels[todayKey2] || '';
   const lbl = document.getElementById('today-day-label');
-  if (lbl) lbl.textContent = todayLabel;
+  if (lbl) lbl.textContent = dayLabels[todayKey2] || '';
 
-  // --- Routine ---
-  const todayRoutine = (d.routine||[])
-    .filter(r => r.day === todayKey2)
-    .sort((a,b) => String(a.time||'').localeCompare(String(b.time||'')));
-
+  const todayRoutine = (d.routine||[]).filter(r => r.day === todayKey2).sort((a,b) => String(a.time||'').localeCompare(String(b.time||'')));
   const routineWrap = document.getElementById('home-today-routine-wrap');
   if (routineWrap) {
-    if (todayRoutine.length === 0) {
+    if (!todayRoutine.length) {
       routineWrap.innerHTML = '<p style="color:var(--muted);font-size:0.9rem;padding:8px 0;">আজকের জন্য কোনো ক্লাস রুটিন নেই।</p>';
     } else {
-      // Group by grade
       const byGrade = {};
-      todayRoutine.forEach(r => {
-        const g = r.grade || 'অন্যান্য';
-        if (!byGrade[g]) byGrade[g] = [];
-        byGrade[g].push(r);
-      });
+      todayRoutine.forEach(r => { const g = r.grade||'অন্যান্য'; if(!byGrade[g]) byGrade[g]=[]; byGrade[g].push(r); });
       let html = '<ul class="today-routine-list">';
       Object.keys(byGrade).forEach(grade => {
         html += `<li><span class="grade-group-title">${esc(grade)}</span></li>`;
         byGrade[grade].forEach(r => {
-          html += `<li class="today-routine-item">
-            <span class="today-routine-time">${esc(r.time)}</span>
-            <div class="today-routine-info">
-              <strong>${esc(r.course)}</strong>
-              <span>${esc(r.room)} • ${esc(r.teacher)}</span>
-            </div>
-          </li>`;
+          html += `<li class="today-routine-item"><span class="today-routine-time">${esc(r.time)}</span><div class="today-routine-info"><strong>${esc(r.course)}</strong><span>${esc(r.room)} • ${esc(r.teacher)}</span></div></li>`;
         });
       });
       html += '</ul>';
@@ -832,28 +869,16 @@ function renderTodaySchedule(d) {
     }
   }
 
-  // --- Today's Exams: filter by today's date (match date string with today) ---
   const now = new Date();
-  const todayStr = now.toLocaleDateString('bn-BD');
-  const todayISO = now.toISOString().slice(0,10); // yyyy-mm-dd
-  // match either bangla date or ISO date
-  const todayExams = (d.exams||[]).filter(e => {
-    const ds = (e.date||'').trim();
-    return ds === todayISO || ds === todayStr || matchBanglaDate(ds, now);
-  });
-
+  const todayISO = now.toISOString().slice(0,10);
+  const todayExams = (d.exams||[]).filter(e => { const ds=(e.date||'').trim(); return ds===todayISO||matchBanglaDate(ds,now); });
   const examWrap = document.getElementById('home-today-exam-wrap');
   if (examWrap) {
-    if (todayExams.length === 0) {
+    if (!todayExams.length) {
       examWrap.innerHTML = '<p style="color:var(--muted);font-size:0.9rem;padding:8px 0;">আজকের জন্য কোনো পরীক্ষা নেই।</p>';
     } else {
       let html = '<ul class="today-exam-list">';
-      todayExams.forEach(e => {
-        html += `<li class="today-exam-item">
-          <strong>${esc(e.grade)} — ${esc(e.subject)}</strong>
-          <span>⏰ ${esc(e.time)} | 🏫 ${esc(e.room||'রুম নির্ধারিত নয়')}</span>
-        </li>`;
-      });
+      todayExams.forEach(e => { html += `<li class="today-exam-item"><strong>${esc(e.grade)} — ${esc(e.subject)}</strong><span>⏰ ${esc(e.time)} | 🏫 ${esc(e.room||'রুম নির্ধারিত নয়')}</span></li>`; });
       html += '</ul>';
       examWrap.innerHTML = html;
     }
@@ -861,42 +886,38 @@ function renderTodaySchedule(d) {
 }
 
 function matchBanglaDate(ds, now) {
-  // Try to match dd/mm/yyyy or dd-mm-yyyy format
   const parts = ds.split(/[\/\-]/);
-  if (parts.length === 3) {
-    const d2 = parseInt(parts[0]), m2 = parseInt(parts[1]), y2 = parseInt(parts[2]);
-    return d2 === now.getDate() && m2 === (now.getMonth()+1) && y2 === now.getFullYear();
-  }
+  if (parts.length === 3) { const d2=parseInt(parts[0]),m2=parseInt(parts[1]),y2=parseInt(parts[2]); return d2===now.getDate()&&m2===(now.getMonth()+1)&&y2===now.getFullYear(); }
   return false;
 }
 
 let activeSchedTab = 'routine';
-function switchSchedTab(tab) {
+window.switchSchedTab = function(tab) {
   activeSchedTab = tab;
-  document.getElementById('sched-routine-panel').style.display = tab === 'routine' ? '' : 'none';
-  document.getElementById('sched-exam-panel').style.display = tab === 'exam' ? '' : 'none';
-  document.getElementById('stab-routine').classList.toggle('active', tab === 'routine');
-  document.getElementById('stab-exam').classList.toggle('active', tab === 'exam');
+  document.getElementById('sched-routine-panel').style.display = tab==='routine'?'':'none';
+  document.getElementById('sched-exam-panel').style.display = tab==='exam'?'':'none';
+  document.getElementById('stab-routine').classList.toggle('active', tab==='routine');
+  document.getElementById('stab-exam').classList.toggle('active', tab==='exam');
 }
 
-function goToday() {
+window.goToday = function() {
   selDay = todayKey();
   document.getElementById('day-filter').value = selDay;
   renderRoutine(getData());
 }
 
-function applyFilter() {
+window.applyFilter = function() {
   selGrade = document.getElementById('grade-filter').value;
   selDay = document.getElementById('day-filter').value;
   renderRoutine(getData());
 }
 
 // ============ ADMIN ============
-function openAdmin() {
+window.openAdmin = function() {
   document.getElementById('admin-overlay').classList.add('open');
   if (isLoggedIn()) { showAdminPanel(); } else { showLoginBox(); }
 }
-function closeAdmin() {
+window.closeAdmin = function() {
   document.getElementById('admin-overlay').classList.remove('open');
   renderAll();
 }
@@ -910,9 +931,10 @@ function showAdminPanel() {
   loadSettingsForm();
   renderAdminLists();
 }
-function doLogin() {
+window.doLogin = async function() {
   const pw = document.getElementById('pw-input').value;
-  if (pw === getPw()) {
+  const correctPw = await getPw();
+  if (pw === correctPw) {
     sessionStorage.setItem(SESSION_KEY, '1');
     document.getElementById('login-err').textContent = '';
     document.getElementById('pw-input').value = '';
@@ -921,19 +943,19 @@ function doLogin() {
     document.getElementById('login-err').textContent = 'ভুল পাসওয়ার্ড। ডিফল্ট: admin123';
   }
 }
-function doLogout() {
+window.doLogout = function() {
   sessionStorage.removeItem(SESSION_KEY);
   showLoginBox();
 }
-function changePw() {
+window.changePw = async function() {
   const np = document.getElementById('new-pw').value.trim();
   if (!np || np.length < 4) { document.getElementById('pw-status').textContent = 'কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড দিন।'; return; }
-  localStorage.setItem(PW_KEY, np);
+  await savePw(np);
   document.getElementById('new-pw').value = '';
   document.getElementById('pw-status').textContent = '✅ পাসওয়ার্ড পরিবর্তন হয়েছে!';
 }
 
-function switchTab(name, btn) {
+window.switchTab = function(name, btn) {
   document.querySelectorAll('.atab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
@@ -952,7 +974,7 @@ function loadSettingsForm() {
   document.getElementById('s-courses').value = s.courses||'';
 }
 
-function saveSettings() {
+window.saveSettings = async function() {
   const d = getData();
   d.settings = {
     name: document.getElementById('s-name').value,
@@ -964,12 +986,11 @@ function saveSettings() {
     teachers: document.getElementById('s-teachers').value,
     courses: document.getElementById('s-courses').value,
   };
-  saveData(d);
+  await saveData(d);
   document.getElementById('settings-status').textContent = '✅ সেভ হয়েছে!';
   renderAll();
 }
 
-// Generic add item
 const itemConfig = {
   notices: { fields: () => ({ id: Date.now()+'', date: document.getElementById('n-date').value, title: document.getElementById('n-title').value, description: document.getElementById('n-desc').value }), clear: () => { ['n-date','n-title','n-desc'].forEach(id => document.getElementById(id).value=''); } },
   exams: { fields: () => ({ id: Date.now()+'', date: document.getElementById('e-date').value, time: document.getElementById('e-time').value, grade: document.getElementById('e-grade').value, subject: document.getElementById('e-subject').value, room: document.getElementById('e-room').value, instructions: document.getElementById('e-instr').value }), clear: () => { ['e-date','e-time','e-grade','e-subject','e-room','e-instr'].forEach(id => document.getElementById(id).value=''); } },
@@ -979,24 +1000,24 @@ const itemConfig = {
   routine: { fields: () => ({ id: Date.now()+'', day: document.getElementById('ro-day').value, grade: document.getElementById('ro-grade').value, time: document.getElementById('ro-time').value, course: document.getElementById('ro-course').value, room: document.getElementById('ro-room').value, teacher: document.getElementById('ro-teacher').value }), clear: () => { ['ro-grade','ro-time','ro-course','ro-room','ro-teacher'].forEach(id => document.getElementById(id).value=''); } },
 };
 
-function addItem(section) {
+window.addItem = async function(section) {
   const cfg = itemConfig[section];
   const item = cfg.fields();
   const d = getData();
   if (!d[section]) d[section] = [];
   d[section].unshift(item);
-  saveData(d);
+  await saveData(d);
   cfg.clear();
   document.getElementById(section + '-status').textContent = '✅ যোগ হয়েছে!';
   setTimeout(() => { document.getElementById(section + '-status').textContent = ''; }, 2000);
   renderAdminLists();
 }
 
-function deleteItem(section, id) {
+window.deleteItem = async function(section, id) {
   if (!confirm('এটি ডিলিট করবেন?')) return;
   const d = getData();
   d[section] = (d[section]||[]).filter(item => item.id !== id);
-  saveData(d);
+  await saveData(d);
   renderAdminLists();
 }
 
@@ -1032,7 +1053,6 @@ document.getElementById('admin-overlay').addEventListener('click', e => { if (e.
 
 // INIT
 selDay = todayKey();
-renderAll();
 showView('home');
 </script>
 </body>
